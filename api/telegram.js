@@ -1,15 +1,16 @@
 import { config } from "../lib/config.js";
-import { sendTelegram, esc } from "../lib/telegram.js";
+import { sendTelegram, mainButtons } from "../lib/telegram.js";
 import { getMarket } from "../lib/market.js";
 import { getHolders } from "../lib/holders.js";
+import { priceCard, holdersCard, statsCard } from "../lib/branding.js";
 
-function normalizeCommand(text = "") {
+function commandOf(text = "") {
   return text.trim().split(/\s+/)[0].toLowerCase().split("@")[0];
 }
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    return res.status(200).json({ ok: true, service: "BULLE Telegram webhook" });
+    return res.status(200).json({ ok: true, service: "BULLE Telegram webhook v2" });
   }
   if (req.method !== "POST") return res.status(405).end();
 
@@ -17,51 +18,73 @@ export default async function handler(req, res) {
   const msg = update.message || update.channel_post;
   if (!msg?.text) return res.status(200).json({ ok: true });
 
-  // Only answer in the configured group, if one is configured.
   if (config.chatId && String(msg.chat.id) !== String(config.chatId)) {
     return res.status(200).json({ ok: true });
   }
 
-  const command = normalizeCommand(msg.text);
+  const command = commandOf(msg.text);
 
   try {
-    if (command === "/price" || command === "/mc") {
-      const m = await getMarket();
-      const text = m
-        ? `🐂 <b>${esc(config.symbol)} MARKET</b>\n\n` +
-          `💵 Price: <b>${m.fmtPrice}</b>\n` +
-          `📈 Market Cap: <b>${m.fmtMarketCap}</b>\n` +
-          `💧 Liquidity: <b>${m.fmtLiquidity}</b>\n` +
-          `📊 24h: <b>${m.change24h >= 0 ? "+" : ""}${m.change24h.toFixed(2)}%</b>\n\n` +
-          `<a href="${m.url}">View chart</a>`
-        : `Market data for ${esc(config.symbol)} is not available yet.`;
-
-      await sendTelegram(text, { chatId: msg.chat.id });
-    }
-
-    if (command === "/holders") {
-      const h = await getHolders();
+    if (command === "/start" || command === "/bulle") {
       await sendTelegram(
-        `👥 <b>${esc(config.symbol)} HOLDERS</b>\n\n` +
-        `🐂 Unique holders: <b>${h.holders.toLocaleString()}</b>` +
-        (h.capped ? `+\n⚠️ Count capped for this request.` : ""),
-        { chatId: msg.chat.id }
+        `🐂 <b>${config.tokenName}</b>\n` +
+        `<i>The Cyber Bull of Solana</i>\n\n` +
+        `⚡ Track the herd directly from Telegram.\n\n` +
+        `Commands:\n` +
+        `/price — live market data\n` +
+        `/holders — holder distribution\n` +
+        `/stats — full Stampede Report\n` +
+        `/buy — official Pump.fun link\n` +
+        `/ca — official contract address`,
+        { chatId: msg.chat.id, replyMarkup: mainButtons() }
       );
     }
 
+    if (command === "/price" || command === "/mc" || command === "/market") {
+      const market = await getMarket();
+      await sendTelegram(priceCard(market), {
+        chatId: msg.chat.id,
+        replyMarkup: mainButtons()
+      });
+    }
+
+    if (command === "/holders") {
+      const holders = await getHolders();
+      await sendTelegram(holdersCard(holders), {
+        chatId: msg.chat.id,
+        replyMarkup: mainButtons()
+      });
+    }
+
     if (command === "/stats") {
-      const [m, h] = await Promise.all([getMarket(), getHolders()]);
+      const [market, holders] = await Promise.all([getMarket(), getHolders()]);
+      await sendTelegram(statsCard(market, holders), {
+        chatId: msg.chat.id,
+        replyMarkup: mainButtons()
+      });
+    }
+
+    if (command === "/buy") {
       await sendTelegram(
-        `🐂 <b>${esc(config.symbol)} STATS</b>\n\n` +
-        `💵 Price: <b>${m?.fmtPrice || "N/A"}</b>\n` +
-        `📈 Market Cap: <b>${m?.fmtMarketCap || "N/A"}</b>\n` +
-        `💧 Liquidity: <b>${m?.fmtLiquidity || "N/A"}</b>\n` +
-        `👥 Holders: <b>${h.holders.toLocaleString()}${h.capped ? "+" : ""}</b>`,
-        { chatId: msg.chat.id }
+        `🟢 <b>BUY ${config.tokenName}</b>\n\n` +
+        `Always verify the official CA before buying:\n` +
+        `<code>${config.mint}</code>`,
+        { chatId: msg.chat.id, replyMarkup: mainButtons() }
+      );
+    }
+
+    if (command === "/ca") {
+      await sendTelegram(
+        `🐂 <b>OFFICIAL ${config.tokenName} CA</b>\n\n<code>${config.mint}</code>`,
+        { chatId: msg.chat.id, replyMarkup: mainButtons() }
       );
     }
   } catch (err) {
     console.error(err);
+    await sendTelegram(
+      `⚠️ BULLE Tracker could not load that data right now. Try again shortly.`,
+      { chatId: msg.chat.id }
+    ).catch(() => {});
   }
 
   return res.status(200).json({ ok: true });
